@@ -68,20 +68,21 @@ func (c *clientCollector) Collect(ch chan<- prometheus.Metric) {
 		vlanId := fmt.Sprintf("%.0f", item.VlanId)
 		port := fmt.Sprintf("%.0f", item.Port)
 
+		collectMetrics := func(desc *prometheus.Desc, valueType prometheus.ValueType, connectionMode, wifiMode string, value float64) {
+			ch <- prometheus.MustNewConstMetric(desc, valueType, value,
+				item.Name, item.Vendor, item.Ip, item.Mac, item.HostName, site, client.SiteId, connectionMode, wifiMode, item.ApName, item.Ssid, vlanId)
+		}
+
 		if item.Wireless {
 			wifiMode := FormatWifiMode(int(item.WifiMode))
 
-			CollectWirelessMetrics := func(desc *prometheus.Desc, valueType prometheus.ValueType, value float64) {
-				ch <- prometheus.MustNewConstMetric(desc, valueType, value,
-					item.Name, item.Vendor, item.Ip, item.Mac, item.HostName, site, client.SiteId, "wireless", wifiMode, item.ApName, item.Ssid, vlanId)
-			}
-			CollectWirelessMetrics(c.omadaClientSignalPct, prometheus.GaugeValue, item.SignalLevel)
-			CollectWirelessMetrics(c.omadaClientSignalNoiseDbm, prometheus.GaugeValue, item.SignalNoise)
-			CollectWirelessMetrics(c.omadaClientRssiDbm, prometheus.GaugeValue, item.Rssi)
-			CollectWirelessMetrics(c.omadaClientTrafficDown, prometheus.CounterValue, item.TrafficDown)
-			CollectWirelessMetrics(c.omadaClientTrafficUp, prometheus.CounterValue, item.TrafficUp)
-			CollectWirelessMetrics(c.omadaClientTxRate, prometheus.GaugeValue, item.TxRate)
-			CollectWirelessMetrics(c.omadaClientRxRate, prometheus.GaugeValue, item.RxRate)
+			collectMetrics(c.omadaClientSignalPct, prometheus.GaugeValue, "wireless", wifiMode, item.SignalLevel)
+			collectMetrics(c.omadaClientSignalNoiseDbm, prometheus.GaugeValue, "wireless", wifiMode, item.SignalNoise)
+			collectMetrics(c.omadaClientRssiDbm, prometheus.GaugeValue, "wireless", wifiMode, item.Rssi)
+			collectMetrics(c.omadaClientTrafficDown, prometheus.CounterValue, "wireless", wifiMode, item.TrafficDown)
+			collectMetrics(c.omadaClientTrafficUp, prometheus.CounterValue, "wireless", wifiMode, item.TrafficUp)
+			collectMetrics(c.omadaClientTxRate, prometheus.GaugeValue, "wireless", wifiMode, item.TxRate)
+			collectMetrics(c.omadaClientRxRate, prometheus.GaugeValue, "wireless", wifiMode, item.RxRate)
 
 			totals[wifiMode] += 1
 			ch <- prometheus.MustNewConstMetric(c.omadaClientDownloadActivityBytes, prometheus.GaugeValue, item.Activity,
@@ -89,6 +90,10 @@ func (c *clientCollector) Collect(ch chan<- prometheus.Metric) {
 		}
 		if !item.Wireless {
 			totals["wired"] += 1
+
+			collectMetrics(c.omadaClientTrafficDown, prometheus.CounterValue, "wired", "", item.TrafficDown)
+			collectMetrics(c.omadaClientTrafficUp, prometheus.CounterValue, "wired", "", item.TrafficUp)
+
 			ch <- prometheus.MustNewConstMetric(c.omadaClientDownloadActivityBytes, prometheus.GaugeValue, item.Activity,
 				item.Name, item.Vendor, item.Ip, item.Mac, item.HostName, site, client.SiteId, "wired", "", "", "", vlanId, port)
 		}
