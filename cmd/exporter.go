@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"net/mail"
 	"os"
 	"strings"
 
@@ -10,10 +12,11 @@ import (
 	"github.com/charlie-haley/omada_exporter/pkg/collector"
 	"github.com/charlie-haley/omada_exporter/pkg/config"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	zerolog "github.com/rs/zerolog"
 	log "github.com/rs/zerolog/log"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 var version = "development"
@@ -21,35 +24,35 @@ var version = "development"
 var conf = config.Config{}
 
 func Run() {
-	app := cli.NewApp()
+	app := cli.Command{}
 	app.Name = "omada_exporter"
 	app.Version = version
 	app.Usage = "Prometheus Exporter for TP-Link Omada Controller SDN."
-	app.EnableBashCompletion = true
-	app.Authors = []*cli.Author{
-		{Name: "Charlie Haley", Email: "charlie-haley@users.noreply.github.com"},
+	app.EnableShellCompletion = true
+	app.Authors = []any{
+		mail.Address{Name: "Charlie Haley", Address: "charlie-haley@users.noreply.github.com"},
 	}
 	app.Flags = []cli.Flag{
-		&cli.StringFlag{Destination: &conf.Host, Required: true, Name: "host", Value: "", Usage: "The hostname of the Omada Controller, including protocol.", EnvVars: []string{"OMADA_HOST"}},
-		&cli.StringFlag{Destination: &conf.Username, Required: true, Name: "username", Value: "", Usage: "Username of the Omada user you'd like to use to fetch metrics.", EnvVars: []string{"OMADA_USER"}},
-		&cli.StringFlag{Destination: &conf.Password, Required: true, Name: "password", Value: "", Usage: "Password for your Omada user.", EnvVars: []string{"OMADA_PASS"}},
-		&cli.StringFlag{Destination: &conf.Port, Name: "port", Value: "9202", Usage: "Port on which to expose the Prometheus metrics.", EnvVars: []string{"OMADA_PORT"}},
-		&cli.StringFlag{Destination: &conf.Site, Name: "site", Value: "Default", Usage: "Omada site to scrape metrics from.", EnvVars: []string{"OMADA_SITE"}},
-		&cli.StringFlag{Destination: &conf.LogLevel, Name: "log-level", Value: "error", Usage: "Application log level.", EnvVars: []string{"LOG_LEVEL"}},
-		&cli.IntFlag{Destination: &conf.Timeout, Name: "timeout", Value: 15, Usage: "Timeout when making requests to the Omada Controller.", EnvVars: []string{"OMADA_REQUEST_TIMEOUT"}},
-		&cli.BoolFlag{Destination: &conf.Insecure, Name: "insecure", Value: false, Usage: "Whether to skip verifying the SSL certificate on the controller.", EnvVars: []string{"OMADA_INSECURE"}},
-		&cli.BoolFlag{Destination: &conf.GoCollectorDisabled, Name: "disable-go-collector", Value: true, Usage: "Disable Go collector metrics.", EnvVars: []string{"OMADA_DISABLE_GO_COLLECTOR"}},
-		&cli.BoolFlag{Destination: &conf.ProcessCollectorDisabled, Name: "disable-process-collector", Value: true, Usage: "Disable process collector metrics.", EnvVars: []string{"OMADA_DISABLE_PROCESS_COLLECTOR"}},
+		&cli.StringFlag{Destination: &conf.Host, Required: true, Name: "host", Value: "", Usage: "The hostname of the Omada Controller, including protocol.", Sources: cli.EnvVars("OMADA_HOST")},
+		&cli.StringFlag{Destination: &conf.Username, Required: true, Name: "username", Value: "", Usage: "Username of the Omada user you'd like to use to fetch metrics.", Sources: cli.EnvVars("OMADA_USER")},
+		&cli.StringFlag{Destination: &conf.Password, Required: true, Name: "password", Value: "", Usage: "Password for your Omada user.", Sources: cli.EnvVars("OMADA_PASS")},
+		&cli.StringFlag{Destination: &conf.Port, Name: "port", Value: "9202", Usage: "Port on which to expose the Prometheus metrics.", Sources: cli.EnvVars("OMADA_PORT")},
+		&cli.StringFlag{Destination: &conf.Site, Name: "site", Value: "Default", Usage: "Omada site to scrape metrics from.", Sources: cli.EnvVars("OMADA_SITE")},
+		&cli.StringFlag{Destination: &conf.LogLevel, Name: "log-level", Value: "error", Usage: "Application log level.", Sources: cli.EnvVars("LOG_LEVEL")},
+		&cli.IntFlag{Destination: &conf.Timeout, Name: "timeout", Value: 15, Usage: "Timeout when making requests to the Omada Controller.", Sources: cli.EnvVars("OMADA_REQUEST_TIMEOUT")},
+		&cli.BoolFlag{Destination: &conf.Insecure, Name: "insecure", Value: false, Usage: "Whether to skip verifying the SSL certificate on the controller.", Sources: cli.EnvVars("OMADA_INSECURE")},
+		&cli.BoolFlag{Destination: &conf.GoCollectorDisabled, Name: "disable-go-collector", Value: false, Usage: "Disable Go collector metrics.", Sources: cli.EnvVars("OMADA_DISABLE_GO_COLLECTOR")},
+		&cli.BoolFlag{Destination: &conf.ProcessCollectorDisabled, Name: "disable-process-collector", Value: false, Usage: "Disable process collector metrics.", Sources: cli.EnvVars("OMADA_DISABLE_PROCESS_COLLECTOR")},
 	}
 	app.Commands = []*cli.Command{
 		{Name: "version", Aliases: []string{"v"}, Usage: "prints the current version.",
-			Action: func(c *cli.Context) error {
+			Action: func(_ context.Context, _ *cli.Command) error {
 				fmt.Println(version)
 				os.Exit(0)
 				return nil
 			}},
 		{Name: "mdocs", Aliases: []string{"md"}, Usage: "prints the metric docs.",
-			Action: func(c *cli.Context) error {
+			Action: func(_ context.Context, _ *cli.Command) error {
 				mdocs()
 				os.Exit(0)
 				return nil
@@ -57,14 +60,14 @@ func Run() {
 	}
 	app.Action = run
 
-	err := app.Run(os.Args)
+	err := app.Run(context.Background(), os.Args)
 	if err != nil {
 		log.Fatal().Err(err).Msg("App failed to run")
 		os.Exit(1)
 	}
 }
 
-func run(c *cli.Context) error {
+func run(ctx context.Context, cmd *cli.Command) error {
 	// set log level
 	level, err := zerolog.ParseLevel(conf.LogLevel)
 	if err != nil {
@@ -74,12 +77,12 @@ func run(c *cli.Context) error {
 
 	if conf.GoCollectorDisabled {
 		// remove Go collector
-		prometheus.Unregister(prometheus.NewGoCollector())
+		prometheus.Unregister(collectors.NewGoCollector())
 	}
 
 	if conf.ProcessCollectorDisabled {
 		// remove Process collector
-		prometheus.Unregister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+		prometheus.Unregister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	}
 
 	// check if host is properly formatted
@@ -94,7 +97,7 @@ func run(c *cli.Context) error {
 	}
 
 	// register omada collectors
-	for _, c := range collectors(client) {
+	for _, c := range allCollectors(client) {
 		prometheus.MustRegister(c)
 	}
 
@@ -129,13 +132,13 @@ func mdocs() {
 	dc := make(chan *prometheus.Desc)
 	go func() {
 		// collectors can't Collect without a client, but Describe doesn't need one.
-		for _, c := range collectors(nil) {
+		for _, c := range allCollectors(nil) {
 			c.Describe(dc)
 		}
 		close(dc)
 	}()
 
-	fmt.Fprintln(os.Stdout, "| Name | Description | Labels |\n|--|--|--|")
+	_, _ = fmt.Fprintln(os.Stdout, "| Name | Description | Labels |\n|--|--|--|")
 
 	// drain the channel
 	for {
@@ -146,15 +149,15 @@ func mdocs() {
 			d = strings.Replace(d, `", help: "`, " | ", 1)
 			d = strings.Replace(d, `", constLabels: {}, variableLabels: [`, " | ", 1)
 			d = strings.Replace(d, `]}`, " | ", 1)
-			fmt.Fprintln(os.Stdout, d)
+			_, _ = fmt.Fprintln(os.Stdout, d)
 		} else {
 			break
 		}
 	}
 }
 
-// collectors returns the full complement of configured collectors.
-func collectors(client *api.Client) []prometheus.Collector {
+// allCollectors returns the full complement of configured allCollectors.
+func allCollectors(client *api.Client) []prometheus.Collector {
 	return []prometheus.Collector{
 		collector.NewClientCollector(client),
 		collector.NewControllerCollector(client),
